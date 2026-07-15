@@ -10,26 +10,29 @@ from rekordbox_mcp.models import SearchOptions, LibraryStats
 
 class TestConnection:
     async def test_connect_with_path(self, tmp_path):
-        """database_path should be passed as db_dir to Rekordbox6Database."""
+        """A custom database_path must bind pyrekordbox to that dir's master.db via path=."""
         db = RekordboxDatabase()
         mock_rb = MagicMock()
         mock_rb.get_content.return_value = []
 
         with patch("rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb) as mock_cls:
             await db.connect(database_path=tmp_path)
-            mock_cls.assert_called_once_with(db_dir=str(tmp_path))
+            mock_cls.assert_called_once_with(
+                path=str(tmp_path / "master.db"), db_dir=str(tmp_path)
+            )
             assert db._connected is True
 
     async def test_connect_without_path(self):
-        """Without path, auto-detect should be used."""
+        """Without a path, pyrekordbox auto-detects; database_path aligns to what it opened."""
         db = RekordboxDatabase()
         mock_rb = MagicMock()
         mock_rb.get_content.return_value = []
+        mock_rb.db_directory = Path("/fake/path")
 
-        with patch("rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb) as mock_cls, \
-             patch.object(db, "_detect_database_path", return_value=Path("/fake/path")):
+        with patch("rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb) as mock_cls:
             await db.connect()
-            mock_cls.assert_called_once_with(db_dir="/fake/path")
+            mock_cls.assert_called_once_with()
+            assert db.database_path == Path("/fake/path")
 
     async def test_disconnect(self, database, mock_db):
         await database.disconnect()

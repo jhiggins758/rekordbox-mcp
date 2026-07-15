@@ -55,18 +55,27 @@ class RekordboxDatabase:
 
         def _connect():
             if database_path:
-                self.database_path = database_path
-                logger.info(f"Connecting to rekordbox database at: {database_path}")
+                # Explicit target: bind pyrekordbox to THIS directory's master.db.
+                # pyrekordbox selects the DB file via `path=`; `db_dir=` only locates
+                # the companion masterPlaylists6.xml / share folder. Passing db_dir
+                # alone leaves path=None, which silently falls back to the
+                # config-detected library instead of the one we asked for.
+                self.database_path = Path(database_path)
+                db_file = self.database_path / "master.db"
+                logger.info(f"Connecting to rekordbox database at: {db_file}")
+                self.db = Rekordbox6Database(
+                    path=str(db_file), db_dir=str(self.database_path)
+                )
             else:
-                self.database_path = self._detect_database_path()
+                # Auto-detect: let pyrekordbox resolve the real library from the
+                # rekordbox config, then align our path to the directory it actually
+                # opened so backups are written next to the live database.
+                logger.info("Auto-detecting rekordbox database via pyrekordbox...")
+                self.db = Rekordbox6Database()
+                self.database_path = Path(self.db.db_directory)
                 logger.info(
                     f"Auto-detected rekordbox database at: {self.database_path}"
                 )
-
-            if self.database_path:
-                self.db = Rekordbox6Database(db_dir=str(self.database_path))
-            else:
-                self.db = Rekordbox6Database()
 
             content = self.db.get_content()
             content_count = len(list(content))
