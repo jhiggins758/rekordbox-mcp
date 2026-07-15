@@ -33,6 +33,8 @@ class MockContent:
     Commnt: str = ""
     rb_local_deleted: int = 0
     ReleaseYear: Optional[int] = None
+    ColorID: Optional[str] = None
+    Color: Optional[object] = None  # simulates the lazy-loaded Color relationship
 
 
 @dataclass
@@ -73,6 +75,37 @@ class MockHistorySong:
     HistoryID: int = 0
     ContentID: int = 0
     TrackNo: int = 0
+    rb_local_deleted: int = 0
+
+
+@dataclass
+class MockColor:
+    ID: str
+    ColorCode: int = 0
+    SortKey: int = 0
+    Commnt: str = ""
+    rb_local_deleted: int = 0
+
+
+@dataclass
+class MockMyTag:
+    ID: str
+    Name: str = ""
+    Seq: int = 0
+    Attribute: int = 0
+    ParentID: Optional[str] = None
+    rb_local_deleted: int = 0
+
+
+@dataclass
+class MockSongMyTag:
+    ID: str
+    MyTagID: str
+    ContentID: str
+    TrackNo: int = 1
+    UUID: str = ""
+    created_at: str = ""
+    updated_at: str = ""
     rb_local_deleted: int = 0
 
 
@@ -180,7 +213,47 @@ def mock_history_songs():
 
 
 @pytest.fixture
-def mock_db(mock_content_list, mock_playlists, mock_playlist_songs, mock_histories, mock_history_songs):
+def mock_colors():
+    return [
+        MockColor(ID="1", ColorCode=16711680, SortKey=1, Commnt="Red"),
+        MockColor(ID="2", ColorCode=16744192, SortKey=2, Commnt="Rose"),
+        MockColor(ID="3", ColorCode=255, SortKey=3, Commnt="Blue"),
+    ]
+
+
+@pytest.fixture
+def mock_my_tags():
+    return [
+        # Groups (top-level, ParentID == "root")
+        MockMyTag(ID="g1", Name="Genre", Seq=1, ParentID="root"),
+        MockMyTag(ID="g2", Name="Situation", Seq=2, ParentID="root"),
+        # Assignable tags under the "Genre" group
+        MockMyTag(ID="t1", Name="House", Seq=1, ParentID="g1"),
+        MockMyTag(ID="t2", Name="Techno", Seq=2, ParentID="g1"),
+        # Soft-deleted tag — should be filtered out
+        MockMyTag(ID="t9", Name="Old Tag", Seq=3, ParentID="g1", rb_local_deleted=1),
+    ]
+
+
+@pytest.fixture
+def mock_song_my_tags():
+    """Track ID '1' already has MyTag 't1' assigned."""
+    return [
+        MockSongMyTag(ID="st1", MyTagID="t1", ContentID="1", TrackNo=1, UUID="uuid-st1"),
+    ]
+
+
+@pytest.fixture
+def mock_db(
+    mock_content_list,
+    mock_playlists,
+    mock_playlist_songs,
+    mock_histories,
+    mock_history_songs,
+    mock_colors,
+    mock_my_tags,
+    mock_song_my_tags,
+):
     """A MagicMock of Rekordbox6Database wired with test data."""
     db = MagicMock()
 
@@ -220,6 +293,53 @@ def mock_db(mock_content_list, mock_playlists, mock_playlist_songs, mock_histori
     db.delete_playlist = MagicMock()
     db.commit = MagicMock()
     db.close = MagicMock()
+
+    # --- Color / MyTag mocks ---
+
+    def get_color_side_effect(**kwargs):
+        if "ID" in kwargs:
+            for c in mock_colors:
+                if c.ID == kwargs["ID"]:
+                    return c
+            return None
+        return mock_colors
+
+    db.get_color = MagicMock(side_effect=get_color_side_effect)
+
+    def get_my_tag_side_effect(**kwargs):
+        if "ID" in kwargs:
+            for t in mock_my_tags:
+                if t.ID == kwargs["ID"]:
+                    return t
+            return None
+        return mock_my_tags
+
+    db.get_my_tag = MagicMock(side_effect=get_my_tag_side_effect)
+
+    def get_my_tag_songs_side_effect(**kwargs):
+        # Mirrors pyrekordbox's _parse_query_result: only "ID"/"registry_id"
+        # kwargs collapse to a single row; ContentID/MyTagID filters always
+        # return a query-like collection (here, a plain list).
+        results = mock_song_my_tags
+        if "ContentID" in kwargs:
+            results = [r for r in results if r.ContentID == kwargs["ContentID"]]
+        if "MyTagID" in kwargs:
+            results = [r for r in results if r.MyTagID == kwargs["MyTagID"]]
+        return results
+
+    db.get_my_tag_songs = MagicMock(side_effect=get_my_tag_songs_side_effect)
+
+    def add_side_effect(row):
+        if isinstance(row, MockSongMyTag) or row.__class__.__name__ == "DjmdSongMyTag":
+            mock_song_my_tags.append(row)
+
+    db.add = MagicMock(side_effect=add_side_effect)
+
+    def delete_side_effect(row):
+        if row in mock_song_my_tags:
+            mock_song_my_tags.remove(row)
+
+    db.delete = MagicMock(side_effect=delete_side_effect)
 
     return db
 

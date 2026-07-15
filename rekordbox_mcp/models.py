@@ -49,6 +49,19 @@ class Track(BaseModel):
         return f"{minutes}:{seconds:02d}"
 
 
+class MyTag(BaseModel):
+    """A rekordbox MyTag (tag definition, possibly a group node in the tag tree)."""
+
+    id: str = Field(..., description="Unique MyTag identifier")
+    name: str = Field(..., description="Tag name")
+    parent_id: Optional[str] = Field(
+        None, description="Parent tag/group ID ('root' children have None)"
+    )
+    is_group: bool = Field(
+        False, description="Whether this node is a tag group (has children) rather than an assignable tag"
+    )
+
+
 class Playlist(BaseModel):
     """
     Rekordbox playlist model.

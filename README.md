@@ -107,7 +107,7 @@ Add to your Claude Desktop configuration:
 }
 ```
 
-## Available Tools (31 tools + 1 resource)
+## Available Tools (39 tools + 1 resource)
 
 ### Search & Discovery
 - **`search_tracks`** - Advanced multi-field track search with filtering (genre, key, BPM, artist, title, rating, etc.)
@@ -134,6 +134,18 @@ Add to your Claude Desktop configuration:
 - **`add_tracks_to_playlist`** - Add multiple tracks to playlist in one operation ⚠️ (Mutation)
 - **`remove_track_from_playlist`** - Remove track from playlist ⚠️ (Mutation)
 - **`delete_playlist`** - Delete playlist permanently ⚠️ (Destructive)
+
+### Track Metadata
+- **`get_available_colors`** - List valid color names/IDs defined in the database
+- **`get_my_tags`** - List the MyTag tree (groups and assignable tags)
+- **`get_track_my_tags`** - List MyTags currently assigned to a specific track
+- **`set_track_rating`** - Set a track's star rating (0-5) ⚠️ (Mutation)
+- **`set_track_color`** - Set or clear a track's color label, by color name ⚠️ (Mutation)
+- **`set_track_comment`** - Set or clear a track's comment text ⚠️ (Mutation)
+- **`add_track_my_tag`** - Assign an existing MyTag to a track ⚠️ (Mutation)
+- **`remove_track_my_tag`** - Unassign a MyTag from a track ⚠️ (Mutation)
+
+> ℹ️ MyTag *definitions* (the tags/groups themselves) must already exist in rekordbox — these tools only assign or unassign existing tags on tracks; they cannot create or delete tag definitions.
 
 ### DJ History & Analytics
 - **`get_history_sessions`** - Get all DJ history sessions with metadata

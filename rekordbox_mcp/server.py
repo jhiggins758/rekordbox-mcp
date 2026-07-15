@@ -736,6 +736,235 @@ async def delete_playlist(playlist_id: str) -> Dict[str, Any]:
         return {"status": "error", "message": f"Failed to delete playlist: {str(e)}"}
 
 
+# Track Metadata Tools
+
+
+@mcp.tool()
+async def get_available_colors() -> List[Dict[str, Any]]:
+    """
+    List valid color labels defined in the rekordbox database.
+
+    Returns:
+        List of colors with id, name, and color_code — use the name with
+        set_track_color
+    """
+    await ensure_database_connected()
+
+    return await db.get_available_colors()
+
+
+@mcp.tool()
+async def get_my_tags() -> List[Dict[str, Any]]:
+    """
+    List the MyTag tree (groups and tags) defined in the rekordbox database.
+
+    Groups (is_group=True) are not assignable; only leaf tags can be assigned
+    to tracks with add_track_my_tag. MyTag definitions must already exist in
+    rekordbox — this server cannot create new tag definitions.
+
+    Returns:
+        List of MyTag nodes with id, name, parent_id, and is_group
+    """
+    await ensure_database_connected()
+
+    tags = await db.get_my_tags()
+    return [tag.model_dump() for tag in tags]
+
+
+@mcp.tool()
+async def get_track_my_tags(track_id: str) -> List[Dict[str, Any]]:
+    """
+    List MyTags currently assigned to a specific track.
+
+    Args:
+        track_id: The unique track identifier
+
+    Returns:
+        List of assigned MyTag nodes with id, name, parent_id, and is_group
+    """
+    await ensure_database_connected()
+
+    tags = await db.get_track_my_tags(track_id)
+    return [tag.model_dump() for tag in tags]
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def set_track_rating(track_id: str, rating: int) -> Dict[str, Any]:
+    """
+    Set the star rating on a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database!
+
+    Args:
+        track_id: ID of the track to modify
+        rating: Star rating from 0 (no rating) to 5
+
+    Returns:
+        Result of the operation
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.set_track_rating(track_id, rating)
+        return {
+            "status": "success",
+            "message": f"Set rating {rating} on track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to set rating: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def set_track_color(
+    track_id: str, color_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Set or clear the color label on a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database!
+
+    Call get_available_colors first to see valid color names. Pass
+    color_name=None (or omit it) to clear the track's color label.
+
+    Args:
+        track_id: ID of the track to modify
+        color_name: Name of the color to set (e.g. "Rose"), or None to clear
+
+    Returns:
+        Result of the operation
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.set_track_color(track_id, color_name)
+        return {
+            "status": "success",
+            "message": f"Set color on track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to set color: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def set_track_comment(track_id: str, comment: str) -> Dict[str, Any]:
+    """
+    Set or clear the comment text on a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database!
+
+    Args:
+        track_id: ID of the track to modify
+        comment: Comment text (empty string clears the comment)
+
+    Returns:
+        Result of the operation
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.set_track_comment(track_id, comment)
+        return {
+            "status": "success",
+            "message": f"Set comment on track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to set comment: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def add_track_my_tag(track_id: str, mytag_id: str) -> Dict[str, Any]:
+    """
+    Assign an existing MyTag to a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database!
+
+    Use get_my_tags to find tag IDs. MyTag groups (is_group=True) are not
+    assignable — only leaf tags can be assigned. MyTag definitions must
+    already exist in rekordbox; this tool only assigns/unassigns them.
+    Assigning a tag that's already assigned is a safe no-op.
+
+    Args:
+        track_id: ID of the track to tag
+        mytag_id: ID of the MyTag to assign
+
+    Returns:
+        Result of the operation
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.add_my_tag_to_track(track_id, mytag_id)
+        return {
+            "status": "success",
+            "message": f"Assigned MyTag {mytag_id} to track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to add MyTag: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def remove_track_my_tag(track_id: str, mytag_id: str) -> Dict[str, Any]:
+    """
+    Unassign a MyTag from a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database!
+
+    Removing a tag that isn't assigned is a safe no-op.
+
+    Args:
+        track_id: ID of the track to untag
+        mytag_id: ID of the MyTag to remove
+
+    Returns:
+        Result of the operation
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.remove_my_tag_from_track(track_id, mytag_id)
+        return {
+            "status": "success",
+            "message": f"Removed MyTag {mytag_id} from track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to remove MyTag: {str(e)}"}
+
+
 # Import Tools
 
 

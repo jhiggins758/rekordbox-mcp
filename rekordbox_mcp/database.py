@@ -12,8 +12,10 @@ import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from uuid import uuid4
 
 from pyrekordbox import Rekordbox6Database
+from pyrekordbox.db6 import tables
 from loguru import logger
 
 from .models import (
@@ -24,6 +26,7 @@ from .models import (
     HistoryTrack,
     HistoryStats,
     LibraryStats,
+    MyTag,
 )
 
 
@@ -1141,6 +1144,318 @@ class RekordboxDatabase:
                 self.db.rollback()
             raise RuntimeError(f"Failed to delete playlist: {str(e)}")
 
+    # --- Metadata operations ---
+
+    def _resolve_color_by_name(self, color_name: str):
+        """Case-insensitive lookup of a DjmdColor row by its name (Commnt). None if no match."""
+        target = color_name.strip().lower()
+        for c in list(self.db.get_color()):
+            if (c.Commnt or "").strip().lower() == target:
+                return c
+        return None
+
+    def _normalize_query_result(self, result) -> list:
+        """Normalize a pyrekordbox get_* result (single row, Query, or None) to a list."""
+        if result is None:
+            return []
+        if isinstance(result, list):
+            return result
+        if hasattr(result, "all"):
+            return list(result.all())
+        return [result]
+
+    async def get_available_colors(self) -> List[Dict[str, Any]]:
+        """List all color labels defined in the database."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            colors = list(self.db.get_color())
+            colors.sort(key=lambda c: getattr(c, "SortKey", 0) or 0)
+            return [
+                {
+                    "id": str(c.ID),
+                    "name": c.Commnt or "",
+                    "color_code": getattr(c, "ColorCode", None),
+                }
+                for c in colors
+            ]
+
+        return await asyncio.to_thread(_inner)
+
+    async def get_my_tags(self) -> List[MyTag]:
+        """List the MyTag tree (groups + tags) from the database."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            rows = [
+                t
+                for t in list(self.db.get_my_tag())
+                if getattr(t, "rb_local_deleted", 0) == 0
+            ]
+            rows.sort(
+                key=lambda t: (str(getattr(t, "ParentID", "") or ""), getattr(t, "Seq", 0) or 0)
+            )
+            return [
+                MyTag(
+                    id=str(t.ID),
+                    name=t.Name or "",
+                    parent_id=None if t.ParentID in (None, "root") else str(t.ParentID),
+                    is_group=t.ParentID in (None, "root"),
+                )
+                for t in rows
+            ]
+
+        return await asyncio.to_thread(_inner)
+
+    async def get_track_my_tags(self, track_id: str) -> List[MyTag]:
+        """List MyTags currently assigned to one track."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            song_tags = self._normalize_query_result(
+                self.db.get_my_tag_songs(ContentID=str(track_id))
+            )
+            active_song_tags = [
+                r for r in song_tags if getattr(r, "rb_local_deleted", 0) == 0
+            ]
+
+            result = []
+            for row in active_song_tags:
+                tag = self.db.get_my_tag(ID=row.MyTagID)
+                if tag is None or getattr(tag, "rb_local_deleted", 0) != 0:
+                    continue
+                result.append(
+                    MyTag(
+                        id=str(tag.ID),
+                        name=tag.Name or "",
+                        parent_id=(
+                            None if tag.ParentID in (None, "root") else str(tag.ParentID)
+                        ),
+                        is_group=False,
+                    )
+                )
+            return result
+
+        return await asyncio.to_thread(_inner)
+
+    async def set_track_rating(self, track_id: str, rating: int) -> Dict[str, Any]:
+        """Set the star rating (0-5) on a track."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            self._create_backup()
+
+            if not (0 <= rating <= 5):
+                raise ValueError(f"Rating must be 0-5, got {rating}")
+
+            try:
+                content = self.db.get_content(ID=int(track_id))
+            except (ValueError, TypeError):
+                content = None
+            if not content or getattr(content, "rb_local_deleted", 0) != 0:
+                raise ValueError(f"Track {track_id} not found")
+
+            content.Rating = rating
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(f"Set rating {rating} on track {track_id}")
+            return {"track_id": track_id, "rating": rating, "title": content.Title or ""}
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to set rating on track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to set track rating: {str(e)}")
+
+    async def set_track_color(
+        self, track_id: str, color_name: Optional[str]
+    ) -> Dict[str, Any]:
+        """Set or clear the color label on a track, by color name."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            self._create_backup()
+
+            try:
+                content = self.db.get_content(ID=int(track_id))
+            except (ValueError, TypeError):
+                content = None
+            if not content or getattr(content, "rb_local_deleted", 0) != 0:
+                raise ValueError(f"Track {track_id} not found")
+
+            if color_name is None or not color_name.strip():
+                content.ColorID = None
+                resolved = None
+            else:
+                color = self._resolve_color_by_name(color_name)
+                if color is None:
+                    raise ValueError(
+                        f"Unknown color '{color_name}'. Use get_available_colors to list valid names."
+                    )
+                content.ColorID = str(color.ID)
+                resolved = color.Commnt
+
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(f"Set color '{resolved}' on track {track_id}")
+            return {"track_id": track_id, "color": resolved, "title": content.Title or ""}
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to set color on track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to set track color: {str(e)}")
+
+    async def set_track_comment(self, track_id: str, comment: str) -> Dict[str, Any]:
+        """Set or clear the comment text on a track."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            self._create_backup()
+
+            try:
+                content = self.db.get_content(ID=int(track_id))
+            except (ValueError, TypeError):
+                content = None
+            if not content or getattr(content, "rb_local_deleted", 0) != 0:
+                raise ValueError(f"Track {track_id} not found")
+
+            content.Commnt = comment
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(f"Set comment on track {track_id}")
+            return {"track_id": track_id, "comment": comment, "title": content.Title or ""}
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to set comment on track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to set track comment: {str(e)}")
+
+    async def add_my_tag_to_track(self, track_id: str, mytag_id: str) -> Dict[str, Any]:
+        """Assign an existing MyTag to a track."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            self._create_backup()
+
+            try:
+                content = self.db.get_content(ID=int(track_id))
+            except (ValueError, TypeError):
+                content = None
+            if not content or getattr(content, "rb_local_deleted", 0) != 0:
+                raise ValueError(f"Track {track_id} not found")
+
+            tag = self.db.get_my_tag(ID=mytag_id)
+            if not tag or getattr(tag, "rb_local_deleted", 0) != 0:
+                raise ValueError(f"MyTag {mytag_id} not found")
+            if tag.ParentID in (None, "root"):
+                raise ValueError(
+                    f"MyTag {mytag_id} ('{tag.Name}') is a tag group, not an assignable tag"
+                )
+
+            existing = [
+                r
+                for r in self._normalize_query_result(
+                    self.db.get_my_tag_songs(
+                        ContentID=str(track_id), MyTagID=str(mytag_id)
+                    )
+                )
+                if getattr(r, "rb_local_deleted", 0) == 0
+            ]
+            if existing:
+                return {
+                    "track_id": track_id,
+                    "mytag_id": mytag_id,
+                    "tag_name": tag.Name,
+                    "already_assigned": True,
+                }
+
+            existing_tags_for_content = self._normalize_query_result(
+                self.db.get_my_tag_songs(ContentID=str(track_id))
+            )
+            track_no = len(existing_tags_for_content) + 1
+
+            now = datetime.now()
+            row = tables.DjmdSongMyTag.create(
+                ID=str(uuid4()),
+                MyTagID=str(mytag_id),
+                ContentID=str(track_id),
+                TrackNo=track_no,
+                UUID=str(uuid4()),
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(row)
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(f"Assigned MyTag {mytag_id} to track {track_id}")
+            return {
+                "track_id": track_id,
+                "mytag_id": mytag_id,
+                "tag_name": tag.Name,
+                "already_assigned": False,
+            }
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to add MyTag {mytag_id} to track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to add MyTag to track: {str(e)}")
+
+    async def remove_my_tag_from_track(
+        self, track_id: str, mytag_id: str
+    ) -> Dict[str, Any]:
+        """Unassign a MyTag from a track."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            self._create_backup()
+
+            rows = [
+                r
+                for r in self._normalize_query_result(
+                    self.db.get_my_tag_songs(
+                        ContentID=str(track_id), MyTagID=str(mytag_id)
+                    )
+                )
+                if getattr(r, "rb_local_deleted", 0) == 0
+            ]
+            if not rows:
+                return {"track_id": track_id, "mytag_id": mytag_id, "removed": False}
+
+            for row in rows:
+                self.db.delete(row)
+
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(f"Removed MyTag {mytag_id} from track {track_id}")
+            return {"track_id": track_id, "mytag_id": mytag_id, "removed": True}
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to remove MyTag {mytag_id} from track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to remove MyTag from track: {str(e)}")
+
     # --- Cleanup operations ---
 
     async def find_broken_tracks(self) -> Dict[str, Any]:
@@ -1317,6 +1632,11 @@ class RekordboxDatabase:
 
     def _content_to_track(self, content) -> Track:
         """Convert pyrekordbox content object to our Track model."""
+        color_name = ""
+        color_obj = getattr(content, "Color", None)
+        if color_obj is not None:
+            color_name = getattr(color_obj, "Commnt", "") or ""
+
         bpm_value = getattr(content, "BPM", 0) or 0
         bpm_float = float(bpm_value) / 100.0 if bpm_value else 0.0
 
@@ -1373,4 +1693,5 @@ class RekordboxDatabase:
             bitrate=int(getattr(content, "BitRate", 0) or 0),
             sample_rate=int(getattr(content, "SampleRate", 0) or 0),
             comments=getattr(content, "Commnt", "") or "",
+            color=color_name or None,
         )
