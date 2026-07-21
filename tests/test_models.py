@@ -4,8 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from rekordbox_mcp.models import (
-    Track, Playlist, HistorySession, HistoryTrack, HistoryStats,
-    SearchOptions, LibraryStats,
+    Track,
+    Playlist,
+    HistorySession,
+    HistoryTrack,
+    HistoryStats,
+    SearchOptions,
+    LibraryStats,
 )
 
 
@@ -44,6 +49,7 @@ class TestPlaylist:
 
     def test_date_validator_with_datetime(self):
         from datetime import datetime
+
         dt = datetime(2024, 6, 15, 10, 30, 0)
         pl = Playlist(id="1", name="P", created_date=dt)
         assert pl.created_date == "2024-06-15 10:30:00"

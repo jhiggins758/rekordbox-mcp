@@ -58,7 +58,8 @@ class MyTag(BaseModel):
         None, description="Parent tag/group ID ('root' children have None)"
     )
     is_group: bool = Field(
-        False, description="Whether this node is a tag group (has children) rather than an assignable tag"
+        False,
+        description="Whether this node is a tag group (has children) rather than an assignable tag",
     )
 
 

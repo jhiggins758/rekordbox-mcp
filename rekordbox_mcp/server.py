@@ -1072,6 +1072,185 @@ async def import_tracks(
     )
 
 
+# Cue Point Tools
+
+
+@mcp.tool()
+async def get_track_cues(track_id: str) -> List[Dict[str, Any]]:
+    """
+    List the cue points set on a track, ordered by position.
+
+    Each cue reports its slot ("A"-"H" for hot cues, "memory" for memory cues),
+    its position in milliseconds, and a readable M:SS.mmm position.
+
+    Args:
+        track_id: ID of the track to inspect
+
+    Returns:
+        List of cue points on the track (empty if the track has none)
+    """
+    await ensure_database_connected()
+
+    return await db.get_track_cues(track_id)
+
+
+@mcp.tool()
+async def get_track_beatgrid(track_id: str) -> Dict[str, Any]:
+    """
+    Read a track's beat grid: every beat, the downbeats, and 8-bar phrase starts.
+
+    Use this to place cues musically — e.g. find the phrase start nearest the
+    drop, then pass that position to add_track_cue. Tracks that rekordbox has
+    not analyzed return has_beatgrid=False.
+
+    Args:
+        track_id: ID of the track to inspect
+
+    Returns:
+        Beat grid positions in milliseconds, plus BPM and track length
+    """
+    await ensure_database_connected()
+
+    return await db.get_track_beatgrid(track_id)
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    }
+)
+async def add_track_cue(
+    track_id: str,
+    position_ms: int,
+    slot: str,
+    overwrite: bool = False,
+    snap: str = "beat",
+) -> Dict[str, Any]:
+    """
+    Add a cue point to a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database! rekordbox must be CLOSED.
+
+    Slots are "A" through "H" for hot cues, or "memory" for a memory cue. A slot
+    that already holds a cue is refused unless overwrite=True, so existing
+    hand-placed cues can't be clobbered by accident.
+
+    By default the position snaps to the nearest beat, which is how cues are
+    normally placed. Pass snap="downbeat" or snap="phrase" to snap to bar or
+    8-bar phrase boundaries, or snap="none" for an exact millisecond position.
+    The result reports snapped_by_ms so you can see how far the point moved.
+
+    Args:
+        track_id: ID of the track to cue
+        position_ms: Position in milliseconds from the start of the track
+        slot: Cue slot — "A"-"H" (hot cue) or "memory"
+        overwrite: Replace the cue already in that slot (default False)
+        snap: One of "beat" (default), "downbeat", "phrase", or "none"
+
+    Returns:
+        Result of the operation, including the final snapped position
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.add_track_cue(track_id, position_ms, slot, overwrite, snap)
+        return {
+            "status": "success",
+            "message": (
+                f"Added cue {result['slot']} at {result['position']} on track {track_id}"
+            ),
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to add cue: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+)
+async def update_track_cue(
+    track_id: str, slot: str, position_ms: int, snap: str = "beat"
+) -> Dict[str, Any]:
+    """
+    Move an existing cue point to a new position.
+
+    ⚠️ CAUTION: This modifies your rekordbox database! rekordbox must be CLOSED.
+
+    Fails if the slot has no cue — use add_track_cue to create one. Snapping
+    works the same way as add_track_cue.
+
+    Args:
+        track_id: ID of the track
+        slot: Cue slot to move — "A"-"H" (hot cue) or "memory"
+        position_ms: New position in milliseconds
+        snap: One of "beat" (default), "downbeat", "phrase", or "none"
+
+    Returns:
+        Result of the operation, including the previous and new positions
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.update_track_cue(track_id, slot, position_ms, snap)
+        return {
+            "status": "success",
+            "message": (
+                f"Moved cue {result['slot']} to {result['position']} on track {track_id}"
+            ),
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to update cue: {str(e)}"}
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+    }
+)
+async def delete_track_cue(track_id: str, slot: str) -> Dict[str, Any]:
+    """
+    Delete a cue point from a track.
+
+    ⚠️ CAUTION: This modifies your rekordbox database! rekordbox must be CLOSED.
+
+    Uses the same soft delete rekordbox itself uses. Deleting an empty slot is a
+    safe no-op.
+
+    Args:
+        track_id: ID of the track
+        slot: Cue slot to clear — "A"-"H" (hot cue) or "memory"
+
+    Returns:
+        Result of the operation, including the cue that was removed
+    """
+    await ensure_database_connected()
+
+    try:
+        result = await db.delete_track_cue(track_id, slot)
+        if not result.get("deleted"):
+            return {
+                "status": "success",
+                "message": f"Track {track_id} had no cue in slot {result['slot']}",
+                **result,
+            }
+        return {
+            "status": "success",
+            "message": f"Deleted cue {result['slot']} from track {track_id}",
+            **result,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to delete cue: {str(e)}"}
+
+
 # Cleanup Tools
 
 

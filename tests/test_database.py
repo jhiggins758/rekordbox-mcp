@@ -15,7 +15,9 @@ class TestConnection:
         mock_rb = MagicMock()
         mock_rb.get_content.return_value = []
 
-        with patch("rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb) as mock_cls:
+        with patch(
+            "rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb
+        ) as mock_cls:
             await db.connect(database_path=tmp_path)
             mock_cls.assert_called_once_with(
                 path=str(tmp_path / "master.db"), db_dir=str(tmp_path)
@@ -29,7 +31,9 @@ class TestConnection:
         mock_rb.get_content.return_value = []
         mock_rb.db_directory = Path("/fake/path")
 
-        with patch("rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb) as mock_cls:
+        with patch(
+            "rekordbox_mcp.database.Rekordbox6Database", return_value=mock_rb
+        ) as mock_cls:
             await db.connect()
             mock_cls.assert_called_once_with()
             assert db.database_path == Path("/fake/path")
@@ -49,9 +53,11 @@ class TestConnection:
 class TestDetectDatabasePath:
     def test_macos(self):
         db = RekordboxDatabase()
-        with patch("rekordbox_mcp.database.os.name", "posix"), \
-             patch("rekordbox_mcp.database.sys.platform", "darwin"), \
-             patch.object(Path, "exists", return_value=True):
+        with (
+            patch("rekordbox_mcp.database.os.name", "posix"),
+            patch("rekordbox_mcp.database.sys.platform", "darwin"),
+            patch.object(Path, "exists", return_value=True),
+        ):
             path = db._detect_database_path()
             assert "Library" in str(path)
             assert "Pioneer" in str(path)
@@ -59,25 +65,31 @@ class TestDetectDatabasePath:
     def test_windows(self):
         db = RekordboxDatabase()
         fake_home = Path("/Users/testuser")
-        with patch("rekordbox_mcp.database.os.name", "nt"), \
-             patch.object(Path, "home", return_value=fake_home), \
-             patch.object(Path, "exists", return_value=True):
+        with (
+            patch("rekordbox_mcp.database.os.name", "nt"),
+            patch.object(Path, "home", return_value=fake_home),
+            patch.object(Path, "exists", return_value=True),
+        ):
             path = db._detect_database_path()
             assert "AppData" in str(path)
 
     def test_linux(self):
         db = RekordboxDatabase()
-        with patch("rekordbox_mcp.database.os.name", "posix"), \
-             patch("rekordbox_mcp.database.sys.platform", "linux"), \
-             patch.object(Path, "exists", return_value=True):
+        with (
+            patch("rekordbox_mcp.database.os.name", "posix"),
+            patch("rekordbox_mcp.database.sys.platform", "linux"),
+            patch.object(Path, "exists", return_value=True),
+        ):
             path = db._detect_database_path()
             assert ".config" in str(path)
 
     def test_not_found(self):
         db = RekordboxDatabase()
-        with patch("rekordbox_mcp.database.os.name", "posix"), \
-             patch("rekordbox_mcp.database.sys.platform", "darwin"), \
-             patch.object(Path, "exists", return_value=False):
+        with (
+            patch("rekordbox_mcp.database.os.name", "posix"),
+            patch("rekordbox_mcp.database.sys.platform", "darwin"),
+            patch.object(Path, "exists", return_value=False),
+        ):
             with pytest.raises(FileNotFoundError):
                 db._detect_database_path()
 
@@ -363,7 +375,9 @@ class TestImportTrack:
 
         return added
 
-    async def test_imports_single_file_with_explicit_metadata(self, database, mock_db, tmp_path):
+    async def test_imports_single_file_with_explicit_metadata(
+        self, database, mock_db, tmp_path
+    ):
         audio = tmp_path / "track.mp3"
         audio.write_bytes(b"fake audio")
 
@@ -461,7 +475,9 @@ class TestImportTrack:
 
         mock_db.add_content = MagicMock(side_effect=fake_add_content)
 
-        result = await database.import_tracks([str(tmp_path)], recursive=True, auto_tag=False)
+        result = await database.import_tracks(
+            [str(tmp_path)], recursive=True, auto_tag=False
+        )
 
         assert result["summary"]["scanned"] == 3
         assert result["summary"]["imported"] == 3

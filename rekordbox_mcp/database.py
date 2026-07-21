@@ -7,11 +7,12 @@ Handles connection to and interaction with the encrypted rekordbox SQLite databa
 import os
 import sys
 import time
+import json
 import asyncio
 import shutil
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from pyrekordbox import Rekordbox6Database
@@ -1204,7 +1205,10 @@ class RekordboxDatabase:
                 if getattr(t, "rb_local_deleted", 0) == 0
             ]
             rows.sort(
-                key=lambda t: (str(getattr(t, "ParentID", "") or ""), getattr(t, "Seq", 0) or 0)
+                key=lambda t: (
+                    str(getattr(t, "ParentID", "") or ""),
+                    getattr(t, "Seq", 0) or 0,
+                )
             )
             return [
                 MyTag(
@@ -1241,7 +1245,9 @@ class RekordboxDatabase:
                         id=str(tag.ID),
                         name=tag.Name or "",
                         parent_id=(
-                            None if tag.ParentID in (None, "root") else str(tag.ParentID)
+                            None
+                            if tag.ParentID in (None, "root")
+                            else str(tag.ParentID)
                         ),
                         is_group=False,
                     )
@@ -1272,7 +1278,11 @@ class RekordboxDatabase:
             self.db.commit()
             self._invalidate_content_cache()
             logger.info(f"Set rating {rating} on track {track_id}")
-            return {"track_id": track_id, "rating": rating, "title": content.Title or ""}
+            return {
+                "track_id": track_id,
+                "rating": rating,
+                "title": content.Title or "",
+            }
 
         try:
             return await asyncio.to_thread(_inner)
@@ -1314,7 +1324,11 @@ class RekordboxDatabase:
             self.db.commit()
             self._invalidate_content_cache()
             logger.info(f"Set color '{resolved}' on track {track_id}")
-            return {"track_id": track_id, "color": resolved, "title": content.Title or ""}
+            return {
+                "track_id": track_id,
+                "color": resolved,
+                "title": content.Title or "",
+            }
 
         try:
             return await asyncio.to_thread(_inner)
@@ -1343,7 +1357,11 @@ class RekordboxDatabase:
             self.db.commit()
             self._invalidate_content_cache()
             logger.info(f"Set comment on track {track_id}")
-            return {"track_id": track_id, "comment": comment, "title": content.Title or ""}
+            return {
+                "track_id": track_id,
+                "comment": comment,
+                "title": content.Title or "",
+            }
 
         try:
             return await asyncio.to_thread(_inner)
@@ -1460,10 +1478,486 @@ class RekordboxDatabase:
         try:
             return await asyncio.to_thread(_inner)
         except Exception as e:
-            logger.error(f"Failed to remove MyTag {mytag_id} from track {track_id}: {e}")
+            logger.error(
+                f"Failed to remove MyTag {mytag_id} from track {track_id}: {e}"
+            )
             if self.db and hasattr(self.db, "rollback"):
                 self.db.rollback()
             raise RuntimeError(f"Failed to remove MyTag from track: {str(e)}")
+
+    # --- Cue points ---
+
+    # Hot cue slot letters map to DjmdCue.Kind. Kind 4 is reserved by rekordbox and
+    # never used for a hot cue: across a 11,684-cue library the canonical 8-hot-cue
+    # set is {1,2,3,5,6,7,8,9} and Kind 4 appears zero times. Kind 0 is a memory cue.
+    CUE_SLOT_KINDS = {"A": 1, "B": 2, "C": 3, "D": 5, "E": 6, "F": 7, "G": 8, "H": 9}
+    MEMORY_CUE_SLOT = "memory"
+
+    @classmethod
+    def _cue_slot_to_kind(cls, slot: str) -> int:
+        """Map a cue slot label ('A'-'H' or 'memory') to its DjmdCue.Kind value."""
+        key = (slot or "").strip().upper()
+        if key in cls.CUE_SLOT_KINDS:
+            return cls.CUE_SLOT_KINDS[key]
+        if key == cls.MEMORY_CUE_SLOT.upper():
+            return 0
+        valid = ", ".join(list(cls.CUE_SLOT_KINDS) + [cls.MEMORY_CUE_SLOT])
+        raise ValueError(f"Unknown cue slot '{slot}'. Valid slots: {valid}")
+
+    @classmethod
+    def _kind_to_cue_slot(cls, kind: Optional[int]) -> str:
+        """Map a DjmdCue.Kind value back to its slot label."""
+        kind = int(kind or 0)
+        if kind == 0:
+            return cls.MEMORY_CUE_SLOT
+        for letter, k in cls.CUE_SLOT_KINDS.items():
+            if k == kind:
+                return letter
+        return f"kind{kind}"
+
+    @staticmethod
+    def _msec_to_frame(position_ms: int) -> int:
+        """rekordbox stores InFrame as floor(msec * 150 / 1000). Exact on every real row."""
+        return int(int(position_ms) * 150 // 1000)
+
+    @staticmethod
+    def _format_position(position_ms: int) -> str:
+        """Format a millisecond position as M:SS.mmm for display."""
+        position_ms = max(0, int(position_ms))
+        minutes, rem = divmod(position_ms, 60000)
+        seconds, millis = divmod(rem, 1000)
+        return f"{minutes}:{seconds:02d}.{millis:03d}"
+
+    def _active_cues(self, track_id: str) -> List[Any]:
+        """All non-deleted DjmdCue rows for a track, sorted by position."""
+        rows = [
+            r
+            for r in self.db.query(tables.DjmdCue)
+            .filter_by(ContentID=str(track_id))
+            .all()
+            # A freshly-created row has rb_local_deleted=None until it's flushed —
+            # treat anything falsy as active, not just 0.
+            if not getattr(r, "rb_local_deleted", 0)
+        ]
+        return sorted(rows, key=lambda r: int(r.InMsec or 0))
+
+    def _cue_to_dict(self, cue: Any) -> Dict[str, Any]:
+        """Serialize a DjmdCue row for tool output."""
+        kind = int(cue.Kind or 0)
+        position_ms = int(cue.InMsec or 0)
+        return {
+            "cue_id": str(cue.ID),
+            "track_id": str(cue.ContentID),
+            "slot": self._kind_to_cue_slot(kind),
+            "kind": kind,
+            "position_ms": position_ms,
+            "position": self._format_position(position_ms),
+            "is_hot_cue": kind > 0,
+            "is_memory_cue": kind == 0,
+        }
+
+    def _rebuild_content_cue_blob(self, track_id: str, content: Any) -> None:
+        """Regenerate the contentCue JSON mirror of a track's cues.
+
+        rekordbox keeps cues in two places: one DjmdCue row per cue, and a compact
+        JSON blob in contentCue.Cues (one row per track, keyed by the track's UUID).
+        Which one it treats as authoritative is undocumented, so every cue mutation
+        rewrites the blob to match the rows. Timestamps in the blob are UTC ISO,
+        while DjmdCue stores local datetimes.
+        """
+
+        def _iso_utc(value: Any) -> str:
+            # DjmdCue timestamps are naive local datetimes; astimezone() on a naive
+            # value assumes local time, so this converts local -> UTC correctly.
+            if not isinstance(value, datetime):
+                value = datetime.now()
+            utc = value.astimezone(timezone.utc)
+            millis = f"{utc.microsecond // 1000:03d}"
+            return utc.strftime("%Y-%m-%dT%H:%M:%S.") + millis + "+00:00"
+
+        entries = []
+        for cue in self._active_cues(track_id):
+            entries.append(
+                {
+                    "ID": str(cue.ID),
+                    "ContentID": str(cue.ContentID),
+                    "InMsec": int(cue.InMsec or 0),
+                    "InFrame": int(cue.InFrame or 0),
+                    "InMpegFrame": int(cue.InMpegFrame or 0),
+                    "InMpegAbs": int(cue.InMpegAbs or 0),
+                    "OutMsec": int(cue.OutMsec if cue.OutMsec is not None else -1),
+                    "OutFrame": int(cue.OutFrame or 0),
+                    "OutMpegFrame": int(cue.OutMpegFrame or 0),
+                    "OutMpegAbs": int(cue.OutMpegAbs or 0),
+                    "Kind": int(cue.Kind or 0),
+                    "Color": int(cue.Color if cue.Color is not None else -1),
+                    "ColorTableIndex": int(cue.ColorTableIndex or 0),
+                    "ActiveLoop": int(cue.ActiveLoop or 0),
+                    "BeatLoopSize": int(cue.BeatLoopSize or 0),
+                    "CueMicrosec": int(cue.CueMicrosec or 0),
+                    "ContentUUID": str(cue.ContentUUID or content.UUID or ""),
+                    "UUID": str(cue.UUID or ""),
+                    "created_at": _iso_utc(getattr(cue, "created_at", None)),
+                    "updated_at": _iso_utc(getattr(cue, "updated_at", None)),
+                }
+            )
+
+        blob = json.dumps(entries, separators=(",", ":"), ensure_ascii=False)
+        row = (
+            self.db.query(tables.ContentCue).filter_by(ContentID=str(track_id)).first()
+        )
+        if row is None:
+            now = datetime.now()
+            row = tables.ContentCue.create(
+                ID=str(content.UUID),
+                ContentID=str(track_id),
+                Cues=blob,
+                rb_cue_count=len(entries),
+                UUID=str(uuid4()),
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(row)
+        else:
+            row.Cues = blob
+
+    # --- Beat grid / snapping ---
+
+    SNAP_MODES = ("none", "beat", "downbeat", "phrase")
+    PHRASE_BARS = 8
+
+    def _read_beatgrid(self, content: Any) -> Dict[str, List[int]]:
+        """Read a track's beat grid from its ANLZ file. Returns ms positions.
+
+        Returns empty lists when the track has no analysis data. Note: never use
+        ``in file`` or ``if not file`` on an AnlzFile — pyrekordbox 0.4.3's
+        ``__len__`` recurses infinitely (anlz/file.py:208). Use ``tag_types``
+        and explicit ``is None`` checks instead.
+        """
+        empty: Dict[str, List[int]] = {"beats": [], "downbeats": [], "phrases": []}
+        try:
+            anlz = self.db.read_anlz_file(content, "DAT")
+        except Exception as e:
+            logger.debug(f"No ANLZ file for track {content.ID}: {e}")
+            return empty
+        if anlz is None or "PQTZ" not in anlz.tag_types:
+            return empty
+
+        tag = anlz.get_tag("PQTZ")
+        try:
+            beat_numbers = list(tag.get_beats())
+            times_ms = [int(round(float(t) * 1000)) for t in tag.get_times()]
+        except Exception as e:
+            logger.debug(f"Unreadable beat grid for track {content.ID}: {e}")
+            return empty
+
+        downbeats = [ms for beat, ms in zip(beat_numbers, times_ms) if int(beat) == 1]
+        return {
+            "beats": times_ms,
+            "downbeats": downbeats,
+            "phrases": downbeats[:: self.PHRASE_BARS],
+        }
+
+    def _snap_position(
+        self, content: Any, position_ms: int, snap: str
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Snap a position to the nearest beat/downbeat/phrase start.
+
+        Falls back to the requested position (reporting why) when the mode is
+        'none' or the track has no beat grid.
+        """
+        mode = (snap or "none").strip().lower()
+        if mode not in self.SNAP_MODES:
+            raise ValueError(
+                f"Unknown snap mode '{snap}'. Valid modes: {', '.join(self.SNAP_MODES)}"
+            )
+        if mode == "none":
+            return position_ms, {"snap": "none", "snapped_by_ms": 0}
+
+        grid = self._read_beatgrid(content)
+        candidates = {
+            "beat": grid["beats"],
+            "downbeat": grid["downbeats"],
+            "phrase": grid["phrases"],
+        }[mode]
+        if not candidates:
+            return position_ms, {
+                "snap": mode,
+                "snapped_by_ms": 0,
+                "snap_warning": "no beat grid on this track — position used as given",
+            }
+
+        nearest = min(candidates, key=lambda ms: abs(ms - position_ms))
+        return nearest, {
+            "snap": mode,
+            "snapped_by_ms": nearest - position_ms,
+            "requested_position_ms": position_ms,
+        }
+
+    async def get_track_beatgrid(self, track_id: str) -> Dict[str, Any]:
+        """Read a track's beat grid (beats, downbeats and 8-bar phrase starts)."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            content = self._get_content_or_raise(track_id)
+            grid = self._read_beatgrid(content)
+            bpm_raw = int(getattr(content, "BPM", 0) or 0)
+            return {
+                "track_id": str(content.ID),
+                "title": content.Title or "",
+                "bpm": round(bpm_raw / 100.0, 2) if bpm_raw else 0.0,
+                "length_seconds": int(getattr(content, "Length", 0) or 0),
+                "has_beatgrid": bool(grid["beats"]),
+                "beat_count": len(grid["beats"]),
+                "first_beat_ms": grid["beats"][0] if grid["beats"] else None,
+                "downbeats_ms": grid["downbeats"],
+                "phrase_starts_ms": grid["phrases"],
+            }
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to read beat grid for track {track_id}: {e}")
+            raise RuntimeError(f"Failed to get track beatgrid: {str(e)}")
+
+    async def get_track_cues(self, track_id: str) -> List[Dict[str, Any]]:
+        """List the cue points on a track, ordered by position."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            content = self._get_content_or_raise(track_id)
+            return [self._cue_to_dict(c) for c in self._active_cues(str(content.ID))]
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to get cues for track {track_id}: {e}")
+            raise RuntimeError(f"Failed to get track cues: {str(e)}")
+
+    def _get_content_or_raise(self, track_id: str) -> Any:
+        """Look up an active track by ID, raising if it's missing or deleted."""
+        try:
+            content = self.db.get_content(ID=int(track_id))
+        except (ValueError, TypeError):
+            content = None
+        if not content or getattr(content, "rb_local_deleted", 0) != 0:
+            raise ValueError(f"Track {track_id} not found")
+        return content
+
+    async def add_track_cue(
+        self,
+        track_id: str,
+        position_ms: int,
+        slot: str,
+        overwrite: bool = False,
+        snap: str = "beat",
+    ) -> Dict[str, Any]:
+        """Add a cue point to a track at the given position."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            content = self._get_content_or_raise(track_id)
+            kind = self._cue_slot_to_kind(slot)
+            requested_ms = int(position_ms)
+            if requested_ms < 0:
+                raise ValueError(f"position_ms must be >= 0, got {requested_ms}")
+
+            snapped_ms, snap_info = self._snap_position(content, requested_ms, snap)
+
+            existing = [
+                c
+                for c in self._active_cues(str(content.ID))
+                if int(c.Kind or 0) == kind
+            ]
+            if existing and not overwrite:
+                occupied = self._cue_to_dict(existing[0])
+                raise ValueError(
+                    f"Cue slot '{self._kind_to_cue_slot(kind)}' is already used on track "
+                    f"{track_id} (at {occupied['position']}). "
+                    f"Pass overwrite=True to replace it."
+                )
+
+            self._create_backup()
+
+            replaced = None
+            for cue in existing:
+                replaced = self._cue_to_dict(cue)
+                cue.rb_local_deleted = 1
+
+            now = datetime.now()
+            row = tables.DjmdCue.create(
+                ID=str(self.db.generate_unused_id(tables.DjmdCue)),
+                ContentID=str(content.ID),
+                InMsec=snapped_ms,
+                InFrame=self._msec_to_frame(snapped_ms),
+                InMpegFrame=0,
+                InMpegAbs=0,
+                OutMsec=-1,
+                OutFrame=0,
+                OutMpegFrame=0,
+                OutMpegAbs=0,
+                Kind=kind,
+                Color=-1,
+                ColorTableIndex=0,
+                ActiveLoop=0,
+                Comment="",
+                BeatLoopSize=0,
+                CueMicrosec=0,
+                ContentUUID=str(content.UUID),
+                UUID=str(uuid4()),
+                # Set explicitly to match real rekordbox rows — column defaults
+                # aren't applied until flush.
+                rb_data_status=0,
+                rb_local_data_status=0,
+                rb_local_deleted=0,
+                rb_local_synced=0,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(row)
+            self.db.flush()
+            self._rebuild_content_cue_blob(str(content.ID), content)
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(
+                f"Added cue {self._kind_to_cue_slot(kind)} at {snapped_ms}ms on track {track_id}"
+            )
+            return {
+                "track_id": str(content.ID),
+                "title": content.Title or "",
+                "slot": self._kind_to_cue_slot(kind),
+                "kind": kind,
+                "position_ms": snapped_ms,
+                "position": self._format_position(snapped_ms),
+                "replaced": replaced,
+                **snap_info,
+            }
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to add cue to track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to add track cue: {str(e)}")
+
+    async def update_track_cue(
+        self, track_id: str, slot: str, position_ms: int, snap: str = "beat"
+    ) -> Dict[str, Any]:
+        """Move an existing cue point to a new position."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            content = self._get_content_or_raise(track_id)
+            kind = self._cue_slot_to_kind(slot)
+            requested_ms = int(position_ms)
+            if requested_ms < 0:
+                raise ValueError(f"position_ms must be >= 0, got {requested_ms}")
+
+            matches = [
+                c
+                for c in self._active_cues(str(content.ID))
+                if int(c.Kind or 0) == kind
+            ]
+            if not matches:
+                raise ValueError(
+                    f"Track {track_id} has no cue in slot '{self._kind_to_cue_slot(kind)}'. "
+                    f"Use add_track_cue to create one."
+                )
+
+            snapped_ms, snap_info = self._snap_position(content, requested_ms, snap)
+
+            self._create_backup()
+
+            cue = matches[0]
+            previous_ms = int(cue.InMsec or 0)
+            cue.InMsec = snapped_ms
+            cue.InFrame = self._msec_to_frame(snapped_ms)
+            cue.updated_at = datetime.now()
+
+            self.db.flush()
+            self._rebuild_content_cue_blob(str(content.ID), content)
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(
+                f"Moved cue {self._kind_to_cue_slot(kind)} on track {track_id} "
+                f"from {previous_ms}ms to {snapped_ms}ms"
+            )
+            return {
+                "track_id": str(content.ID),
+                "title": content.Title or "",
+                "slot": self._kind_to_cue_slot(kind),
+                "kind": kind,
+                "previous_position_ms": previous_ms,
+                "previous_position": self._format_position(previous_ms),
+                "position_ms": snapped_ms,
+                "position": self._format_position(snapped_ms),
+                **snap_info,
+            }
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to update cue on track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to update track cue: {str(e)}")
+
+    async def delete_track_cue(self, track_id: str, slot: str) -> Dict[str, Any]:
+        """Delete a cue point from a track (soft delete, as rekordbox does)."""
+        if not self.db:
+            raise RuntimeError("Database not connected")
+
+        def _inner():
+            content = self._get_content_or_raise(track_id)
+            kind = self._cue_slot_to_kind(slot)
+
+            matches = [
+                c
+                for c in self._active_cues(str(content.ID))
+                if int(c.Kind or 0) == kind
+            ]
+            if not matches:
+                return {
+                    "track_id": str(content.ID),
+                    "title": content.Title or "",
+                    "slot": self._kind_to_cue_slot(kind),
+                    "deleted": False,
+                }
+
+            self._create_backup()
+
+            removed = self._cue_to_dict(matches[0])
+            for cue in matches:
+                cue.rb_local_deleted = 1
+                cue.updated_at = datetime.now()
+
+            self.db.flush()
+            self._rebuild_content_cue_blob(str(content.ID), content)
+            self.db.commit()
+            self._invalidate_content_cache()
+            logger.info(
+                f"Deleted cue {self._kind_to_cue_slot(kind)} from track {track_id}"
+            )
+            return {
+                "track_id": str(content.ID),
+                "title": content.Title or "",
+                "slot": self._kind_to_cue_slot(kind),
+                "deleted": True,
+                "removed_cue": removed,
+            }
+
+        try:
+            return await asyncio.to_thread(_inner)
+        except Exception as e:
+            logger.error(f"Failed to delete cue from track {track_id}: {e}")
+            if self.db and hasattr(self.db, "rollback"):
+                self.db.rollback()
+            raise RuntimeError(f"Failed to delete track cue: {str(e)}")
 
     # --- Cleanup operations ---
 

@@ -71,7 +71,9 @@ class TestSetTrackComment:
 
 
 class TestAddMyTagToTrack:
-    async def test_inserts_row_with_all_fields(self, database, mock_db, mock_song_my_tags):
+    async def test_inserts_row_with_all_fields(
+        self, database, mock_db, mock_song_my_tags
+    ):
         before_count = len(mock_song_my_tags)
         result = await database.add_my_tag_to_track("2", "t2")
 
