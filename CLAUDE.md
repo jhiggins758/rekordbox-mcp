@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-An MCP server that provides Claude with direct read/write access to the rekordbox DJ software database. Built with FastMCP and pyrekordbox, it connects to rekordbox's encrypted SQLite (SQLCipher) database to expose 31 tools and 1 resource for searching tracks, importing new audio files, managing playlists, analyzing DJ history, and computing library statistics.
+A monorepo with two layers:
+
+1. **`rekordbox_mcp/`** — an MCP server giving Claude direct read/write access to the rekordbox DJ database. Built with FastMCP and pyrekordbox (encrypted SQLite/SQLCipher); 44 tools + 1 resource: search, playlists, DJ history, analytics, track import, metadata editing (rating/color/comment/MyTags), cue points + beat grids, and cleanup.
+2. **`toolkit/` + `skills/`** — an optional workflow layer: audio-analysis pipelines and Claude Code skills configured per-user via `~/.dj-toolkit/config.json` (created by the `dj-onboard` skill). NOTHING in the toolkit may hardcode library-specific values (paths, MyTag IDs, genre names) — everything flows through `toolkit/djtk_config.py`. Generated artifacts (features, models, reports) go to the config's `workspace`, never into this repo. **Never commit user artifacts** (`*.jsonl`, `*.pkl`, `config.json`, workspace contents).
+
+Read `docs/FIELD_NOTES.md` before touching database internals — it records empirically-verified behavior (cue slot mapping, relinking, ORM traps, smart playlists) including places where pyrekordbox's own docstrings are wrong.
 
 ## Commands
 

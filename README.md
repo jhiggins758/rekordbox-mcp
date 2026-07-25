@@ -107,7 +107,41 @@ Add to your Claude Desktop configuration:
 }
 ```
 
-## Available Tools (39 tools + 1 resource)
+## The DJ Toolkit (optional — `toolkit/` + `skills/`)
+
+Beyond the raw MCP tools, this repo ships an **agent-oriented workflow layer**: audio
+analysis pipelines and Claude Code skills that learn *your* conventions instead of
+imposing generic ones. Nothing about it is preconfigured to any particular library — a
+one-time onboarding maps everything to yours.
+
+**The design principle: your data is ground truth.** Your MyTags outrank audio models;
+your existing hot cues define your cue system; your star ratings define energy. Audio
+analysis only fills gaps, and only ever *proposes*.
+
+What it can do after onboarding:
+- **Mine your hot-cue system** from the cues you've already placed (`mine_cue_system.py`)
+  — detects your anchor slot (e.g. "C = the drop") and your per-genre ladder of offsets,
+  with per-slot consistency stats. Validated: rediscovered a 1,400-track library's full
+  ladder at 93-99% per-slot consistency.
+- **Fill cue ladders automatically**: you set one anchor cue while auditioning; the
+  toolkit derives the rest (~99% faithful, pure beat-grid arithmetic). Plus an optional
+  ML drop-detector for bulk proposals (trained on *your* cues; always approval-gated).
+- **Derive energy tags from star ratings**, sync rating→color schemes, and catch
+  vocal tracks by credit sweep + audio suggestion.
+- **Character calibration**: a melodic-vs-heavy audio model fitted against your own tags
+  (with honestly-documented limits — see the field notes).
+
+**Setup:** install the MCP (below), then run the **`dj-onboard`** skill from
+`skills/dj-onboard/` — it connects, maps your tags, mines your cue system, and writes
+`~/.dj-toolkit/config.json`. Copy the other skills (`cue-tracks`, `process-imports`,
+`refresh-dj-engine`) into `~/.claude/skills/` to drive the workflows conversationally.
+All toolkit scripts are configured entirely by that config file; generated artifacts stay
+in the workspace directory, never in your library or this repo.
+
+Hard-won knowledge about the rekordbox database itself (relinking, cue internals, ORM
+traps, smart playlists) is written up in **[docs/FIELD_NOTES.md](docs/FIELD_NOTES.md)**.
+
+## Available Tools (44 tools + 1 resource)
 
 ### Search & Discovery
 - **`search_tracks`** - Advanced multi-field track search with filtering (genre, key, BPM, artist, title, rating, etc.)
@@ -146,6 +180,15 @@ Add to your Claude Desktop configuration:
 - **`remove_track_my_tag`** - Unassign a MyTag from a track ⚠️ (Mutation)
 
 > ℹ️ MyTag *definitions* (the tags/groups themselves) must already exist in rekordbox — these tools only assign or unassign existing tags on tracks; they cannot create or delete tag definitions.
+
+### Cue Points & Beat Grid
+- **`get_track_cues`** - List a track's cue points with decoded slot letters ("A"-"H", "memory") and positions
+- **`get_track_beatgrid`** - Read a track's beat grid: every beat, downbeats, and 8-bar phrase starts (for musically-placed cues)
+- **`add_track_cue`** - Add a hot cue or memory cue at a position; snaps to the nearest beat by default (also "downbeat", "phrase", or "none"); refuses occupied slots unless `overwrite=True` ⚠️ (Mutation)
+- **`update_track_cue`** - Move an existing cue to a new position (same snapping) ⚠️ (Mutation)
+- **`delete_track_cue`** - Remove a cue from a slot (soft delete, exactly as rekordbox does) ⚠️ (Destructive)
+
+> ℹ️ Cue writes keep both of rekordbox's internal representations in sync (the `djmdCue` rows *and* the `contentCue` JSON mirror), use the verified slot mapping (A=1…H=9, Kind 4 reserved, Kind 0 = memory), and never need to touch analysis files — cues live in the database only. See [docs/FIELD_NOTES.md](docs/FIELD_NOTES.md) for the full story.
 
 ### DJ History & Analytics
 - **`get_history_sessions`** - Get all DJ history sessions with metadata

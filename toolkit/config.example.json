@@ -1,0 +1,54 @@
+{
+ "_comment": "DJ toolkit configuration. Copy to ~/.dj-toolkit/config.json (or set DJTK_CONFIG) and fill in — or better, run the dj-onboard skill which builds this interactively from YOUR library. Fields marked (onboard) are discovered/asked during onboarding.",
+
+ "workspace": "~/.dj-toolkit",
+
+ "database_dir": null,
+ "_database_dir": "Folder containing rekordbox's master.db (e.g. 'D:/PIONEER/Master'). null = pyrekordbox auto-detect from the default install location.",
+
+ "music_roots": [],
+ "_music_roots": "Folders to search when a track's stored path is missing (audio analysis needs the real files). e.g. ['D:/Library', 'C:/Users/me/Dropbox/rekordbox']",
+
+ "genres": {
+  "primary": {"match": ["drum"], "bpm": [168, 178]},
+  "secondary": {"match": ["house", "bass house", "tech house"], "bpm": [118, 140]}
+ },
+ "_genres": "Your main performing genre families: substring matches against the rekordbox Genre field + a BPM window. 'primary' drives cue mining, character calibration and vocal analysis defaults.",
+
+ "tags": {
+  "vocal": null,
+  "energy_low": null,
+  "energy_medium": null,
+  "energy_high": null,
+  "favorite": null,
+  "ignore": []
+ },
+ "_tags": "(onboard) MyTag IDs from YOUR library (they differ per database — list them with the get_my_tags MCP tool). 'vocal' marks vocal-forward tracks (ground truth for vocal spacing). 'ignore' = tags whose tracks should never enter generated sets.",
+
+ "star_to_energy": {
+  "1": ["low"], "2": ["low"], "3": ["medium"], "4": ["medium", "high"], "5": ["high"]
+ },
+ "_star_to_energy": "(onboard) How star ratings map to energy tags for assign_energy_tags.py. Overlaps are allowed (a rating can grant two tags).",
+
+ "character_tags": {"melodic": [], "heavy": []},
+ "_character_tags": "(onboard) MyTag NAMES you use that mean melodic/light vs heavy/dark. calibrate.py fits the audio character model against these. Leave empty to skip character calibration.",
+
+ "cue_system": null,
+ "_cue_system": "(onboard) Written by mine_cue_system.py after analyzing your existing cues. Shape: {'anchor_slot': 'C', 'anchor_meaning': 'the drop', 'ladders': {'primary': {'D': -4, 'B': -32, ...offsets in beats before the anchor...}, 'secondary': {...}}}. null = cue tools run in manual-anchor mode only.",
+
+ "vocal_names": {"extra_vocalists": [], "producers": []},
+ "_vocal_names": "Extends the shipped vocalist/producer name lists in find_vocal_credits.py: names in credits that indicate a vocal track (extra_vocalists) or that make a 'feat.' a producer collab, not a vocal (producers).",
+
+ "rating_colors": null,
+ "_rating_colors": "Optional: encode star rating as track color, e.g. {'5': 'Red', '4': 'Orange', '3': 'Yellow', '2': 'Purple', '1': 'Blue'}. Used by sync_rating_colors.py. null = feature off.",
+
+ "preferences": {
+  "banned_artists": [],
+  "heavy_skew_artists": [],
+  "vocal_rules": {
+   "default_max_mainly_vocal_share": 0.25,
+   "min_gap_between_mainly_vocal": 2
+  }
+ },
+ "_preferences": "Set-building guardrails learned from your feedback: artists never to auto-place, artists that read heavier than their audio suggests, vocal density/spacing caps."
+}

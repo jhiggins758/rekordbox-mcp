@@ -145,3 +145,10 @@ library_*.xml
 # Local Claude settings
 .claude/settings.local.json
 .claude/project-summary.md
+# DJ Toolkit — user config & generated artifacts (per-library, never commit)
+config.json
+.dj-toolkit/
+toolkit/*.jsonl
+toolkit/*.pkl
+*.jsonl
+*.pkl
