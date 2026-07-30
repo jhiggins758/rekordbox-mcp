@@ -1,0 +1,51 @@
+# Keep the bundle lean: ship only what the MCP server needs at runtime.
+# Bundle keeps: manifest.json, pyproject.toml, uv.lock, rekordbox_mcp/, README.md, LICENSE
+
+# Workflow layer (separate power-user install, not part of the Claude Desktop extension)
+toolkit/
+skills/
+docs/
+
+# Tests & dev/scratch scripts
+tests/
+test-*.py
+test_*.py
+inspect-*.py
+main.py
+run-server.sh
+export_genre_to_zip.py
+IMPLEMENTATION_WORKORDER.md
+glama.json
+CLAUDE.md
+# NOTE: setup-key.py is intentionally KEPT — it's the key-resolution fallback
+# documented in the README for machines where pyrekordbox can't auto-resolve.
+
+# VCS / CI
+.git/
+.github/
+.gitignore
+
+# Python envs & build artifacts
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# The bundle itself
+*.mcpb
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+
+# User data that must never ship
+*.jsonl
+*.pkl
+config.json

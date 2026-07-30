@@ -1,0 +1,89 @@
+{
+  "manifest_version": "0.3",
+  "name": "rekordbox-mcp",
+  "display_name": "Rekordbox",
+  "version": "1.1.0",
+  "description": "Give Claude direct access to your rekordbox library — search, playlists, cues, tags, ratings, history, and imports.",
+  "long_description": "Connects Claude to your local rekordbox 6/7 database (read + write) via pyrekordbox. Search and analyze your collection, build and edit playlists, place hot cues with beat-grid snapping, edit ratings/colors/comments/MyTags, import tracks, and mine your DJ history. Writes automatically back up the database first and require rekordbox to be closed (pyrekordbox blocks commits while it runs). Built on the rekordbox-mcp server originally created by Dave Henke; this build adds cue-point, metadata-editing, and import tooling. Requires `uv` (https://docs.astral.sh/uv/) on your PATH — the extension launches the Python server through it, which resolves the correct native dependencies on first run.",
+  "author": {
+    "name": "Josh Higgins",
+    "url": "https://github.com/jhiggins758"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhiggins758/rekordbox-mcp"
+  },
+  "homepage": "https://github.com/jhiggins758/rekordbox-mcp",
+  "documentation": "https://github.com/jhiggins758/rekordbox-mcp#readme",
+  "license": "MIT",
+  "keywords": ["rekordbox", "dj", "music", "pioneer", "cue", "playlist"],
+  "server": {
+    "type": "python",
+    "entry_point": "rekordbox_mcp/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "rekordbox-mcp"],
+      "env": {
+        "REKORDBOX_DATABASE_DIR": "${user_config.database_dir}"
+      }
+    }
+  },
+  "user_config": {
+    "database_dir": {
+      "type": "directory",
+      "title": "Rekordbox database folder (optional)",
+      "description": "Folder containing your rekordbox master.db (e.g. the 'Pioneer' or 'PIONEER/Master' folder). Leave blank to auto-detect the default install location.",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"]
+  },
+  "tools": [
+    {"name": "search_tracks", "description": "Multi-field track search (artist, title, genre, key, BPM, rating…)."},
+    {"name": "get_track_details", "description": "Full metadata for a track by ID."},
+    {"name": "get_tracks_by_key", "description": "Find tracks in a Camelot key (e.g. 5A, 12B)."},
+    {"name": "get_tracks_by_bpm_range", "description": "Find tracks within a BPM range."},
+    {"name": "get_genre_filepaths", "description": "File paths for tracks of a genre (token-efficient)."},
+    {"name": "get_most_played_tracks", "description": "Tracks ranked by play count."},
+    {"name": "get_top_rated_tracks", "description": "Tracks ranked by star rating."},
+    {"name": "get_unplayed_tracks", "description": "Tracks with zero plays."},
+    {"name": "get_track_file_path", "description": "Filesystem path for a track."},
+    {"name": "search_tracks_by_filename", "description": "Find tracks by partial filename."},
+    {"name": "get_library_stats", "description": "Library totals: counts, playtime, BPM, genres."},
+    {"name": "analyze_library", "description": "Group/aggregate the library by genre, key, year, artist, or rating."},
+    {"name": "validate_track_ids", "description": "Check which of a list of track IDs are valid."},
+    {"name": "get_playlists", "description": "List all playlists and folders (incl. smart playlists)."},
+    {"name": "get_playlist_tracks", "description": "Tracks in a playlist, in order."},
+    {"name": "create_playlist", "description": "Create a playlist or folder. (write)"},
+    {"name": "add_track_to_playlist", "description": "Add one track to a playlist. (write)"},
+    {"name": "add_tracks_to_playlist", "description": "Add multiple tracks to a playlist in order. (write)"},
+    {"name": "remove_track_from_playlist", "description": "Remove a track from a playlist. (write)"},
+    {"name": "delete_playlist", "description": "Delete a playlist. (destructive)"},
+    {"name": "get_available_colors", "description": "List color labels defined in the database."},
+    {"name": "get_my_tags", "description": "List the MyTag tree (groups + assignable tags)."},
+    {"name": "get_track_my_tags", "description": "MyTags assigned to a track."},
+    {"name": "set_track_rating", "description": "Set a track's star rating (0-5). (write)"},
+    {"name": "set_track_color", "description": "Set or clear a track's color label. (write)"},
+    {"name": "set_track_comment", "description": "Set or clear a track's comment. (write)"},
+    {"name": "add_track_my_tag", "description": "Assign an existing MyTag to a track. (write)"},
+    {"name": "remove_track_my_tag", "description": "Unassign a MyTag from a track. (write)"},
+    {"name": "get_track_cues", "description": "List a track's hot/memory cues with slot letters and positions."},
+    {"name": "get_track_beatgrid", "description": "Beats, downbeats, and 8-bar phrase starts for a track."},
+    {"name": "add_track_cue", "description": "Add a hot/memory cue, snapped to the beat grid. (write)"},
+    {"name": "update_track_cue", "description": "Move an existing cue to a new position. (write)"},
+    {"name": "delete_track_cue", "description": "Remove a cue from a slot (soft delete). (destructive)"},
+    {"name": "get_history_sessions", "description": "All DJ history sessions with metadata."},
+    {"name": "get_session_tracks", "description": "Tracks played in a session."},
+    {"name": "get_recent_sessions", "description": "Sessions within the last N days."},
+    {"name": "search_history_sessions", "description": "Search sessions by name, date, or track count."},
+    {"name": "get_history_stats", "description": "DJ performance stats across history."},
+    {"name": "import_track", "description": "Import one audio file (ID3 autofill via mutagen). (write)"},
+    {"name": "import_tracks", "description": "Batch-import files/directories. (write)"},
+    {"name": "find_broken_tracks", "description": "Scan for missing files, streams, and orphaned playlist refs."},
+    {"name": "cleanup_orphaned_playlist_entries", "description": "Remove playlist entries pointing at deleted tracks. (write)"},
+    {"name": "remove_broken_tracks", "description": "Soft-delete tracks by ID and unlink from playlists. (destructive)"},
+    {"name": "connect_database", "description": "Connect explicitly, optionally to a custom database path."}
+  ]
+}

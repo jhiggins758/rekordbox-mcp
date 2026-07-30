@@ -1,0 +1,38 @@
+name: Release
+
+# Packs the MCP into a downloadable .mcpb bundle and attaches it to the GitHub
+# Release whenever a v* tag is pushed:  git tag v1.1.0 && git push origin v1.1.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-mcpb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate manifest
+        run: npx --yes @anthropic-ai/mcpb@latest validate manifest.json
+
+      - name: Pack bundle
+        run: |
+          mkdir -p dist
+          npx --yes @anthropic-ai/mcpb@latest pack . dist/rekordbox-mcp.mcpb
+
+      - name: Attach bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/rekordbox-mcp.mcpb
+          fail_on_unmatched_files: true
+          generate_release_notes: true

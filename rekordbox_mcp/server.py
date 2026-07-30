@@ -5,6 +5,7 @@ A FastMCP-based server for rekordbox database management with real-time database
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -1348,7 +1349,10 @@ async def ensure_database_connected():
 
         try:
             db = RekordboxDatabase()
-            await db.connect()
+            # Optional explicit DB location (e.g. MCPB user config). Blank/unset =
+            # pyrekordbox auto-detect from the default install location.
+            env_dir = os.environ.get("REKORDBOX_DATABASE_DIR") or None
+            await db.connect(env_dir)
 
             track_count = await db.get_track_count()
             playlist_count = len(await db.get_playlists())
@@ -1380,10 +1384,21 @@ def main():
     import signal
     import asyncio
 
-    # Configure logging
+    # Optional explicit database location. Both the documented `--database-path DIR`
+    # CLI flag and the MCPB bundle (which passes it via env) resolve to the same
+    # REKORDBOX_DATABASE_DIR env var, which connect() reads. Blank = auto-detect.
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a == "--database-path" and i + 1 < len(argv):
+            os.environ["REKORDBOX_DATABASE_DIR"] = argv[i + 1]
+        elif a.startswith("--database-path="):
+            os.environ["REKORDBOX_DATABASE_DIR"] = a.split("=", 1)[1]
+
+    # Configure logging. MUST go to stderr: stdout is the JSON-RPC channel for the
+    # stdio transport, so any log line on stdout corrupts the MCP protocol.
     logger.remove()
     logger.add(
-        sink=lambda msg: print(msg, end=""),
+        sink=sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
         level="INFO",
     )

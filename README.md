@@ -59,6 +59,41 @@ This software directly accesses your rekordbox database. **Always create a backu
 
 **If you are not comfortable with these risks, use the read-only XML export functionality instead.**
 
+## Install into Claude Desktop (one file)
+
+The easiest way to install — no cloning, no editing JSON:
+
+1. Download the latest **`rekordbox-mcp.mcpb`** from the
+   [Releases page](https://github.com/jhiggins758/rekordbox-mcp/releases/latest).
+2. Open **Claude Desktop → Settings → Extensions**.
+3. **Drag the `.mcpb` file** into the Extensions window (or use *Install from file*).
+4. (Optional) Set your **Rekordbox database folder** in the extension's settings — the
+   folder containing `master.db`. Leave it blank to auto-detect the default install
+   location.
+5. Enable the extension.
+
+**Prerequisite — [`uv`](https://docs.astral.sh/uv/) must be installed and on your PATH.**
+The bundle ships the server's source and launches it with `uv`, which resolves Python and
+the correct native dependencies (SQLCipher, numpy, …) per platform on first run:
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Notes:
+- **rekordbox 6 or 7** with an existing library is required. The database encryption key is
+  fetched automatically by pyrekordbox on first connect; if a machine can't auto-resolve it,
+  run the `setup-key.py` fallback shipped in the bundle.
+- **First launch takes ~1–2 minutes** while `uv` builds the dependency environment. If the
+  first handshake times out, disable and re-enable (or restart) the extension once.
+- **Write tools require rekordbox to be closed** (pyrekordbox blocks commits while it runs);
+  read-only tools work with it open. Back up your library first (see safety notice above).
+- The **DJ Toolkit** (`toolkit/` + `skills/`) is a separate optional install — see
+  [The DJ Toolkit](#the-dj-toolkit-optional--toolkit--skills) below.
+
 ## Quick Start
 
 ### Prerequisites
