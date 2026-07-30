@@ -166,12 +166,18 @@ What it can do after onboarding:
 - **Character calibration**: a melodic-vs-heavy audio model fitted against your own tags
   (with honestly-documented limits — see the field notes).
 
-**Setup:** install the MCP (below), then run the **`dj-onboard`** skill from
-`skills/dj-onboard/` — it connects, maps your tags, mines your cue system, and writes
-`~/.dj-toolkit/config.json`. Copy the other skills (`cue-tracks`, `process-imports`,
-`refresh-dj-engine`) into `~/.claude/skills/` to drive the workflows conversationally.
-All toolkit scripts are configured entirely by that config file; generated artifacts stay
-in the workspace directory, never in your library or this repo.
+**Setup (one download):** grab **`rekordbox-dj-toolkit.zip`** from the
+[latest release](https://github.com/jhiggins758/rekordbox-mcp/releases/latest) — a
+small, self-contained bundle that ships the toolkit, the skills, and its own copy of the
+MCP server, so Claude Code users need nothing else (not even the `.mcpb`). Unzip it,
+`uv sync`, register the server with Claude Code, copy the skills into `~/.claude/skills/`,
+then run the **`dj-onboard`** skill — it connects, maps your tags, mines your cue system,
+and writes `~/.dj-toolkit/config.json`. Full steps are in the bundle's **`SETUP.md`** (also
+[`docs/TOOLKIT_SETUP.md`](docs/TOOLKIT_SETUP.md)). After onboarding, drive the workflows
+conversationally with `cue-tracks`, `process-imports`, and `refresh-dj-engine`. All toolkit
+scripts are configured entirely by that config file; generated artifacts stay in the
+workspace directory, never in your library or this repo. (Working from a clone instead? Same
+steps, minus the download.)
 
 Hard-won knowledge about the rekordbox database itself (relinking, cue internals, ORM
 traps, smart playlists) is written up in **[docs/FIELD_NOTES.md](docs/FIELD_NOTES.md)**.

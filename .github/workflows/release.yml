@@ -1,7 +1,9 @@
 name: Release
 
-# Packs the MCP into a downloadable .mcpb bundle and attaches it to the GitHub
-# Release whenever a v* tag is pushed:  git tag v1.1.0 && git push origin v1.1.0
+# On a v* tag (git tag v1.1.0 && git push origin v1.1.0) build and attach two
+# downloadable artifacts to the GitHub Release:
+#   - rekordbox-mcp.mcpb        the MCP server, for Claude Desktop (drag-to-install)
+#   - rekordbox-dj-toolkit.zip  the workflow layer, for Claude Code (self-contained)
 on:
   push:
     tags:
@@ -25,14 +27,31 @@ jobs:
       - name: Validate manifest
         run: npx --yes @anthropic-ai/mcpb@latest validate manifest.json
 
-      - name: Pack bundle
+      - name: Pack .mcpb bundle (Claude Desktop)
         run: |
           mkdir -p dist
           npx --yes @anthropic-ai/mcpb@latest pack . dist/rekordbox-mcp.mcpb
 
-      - name: Attach bundle to release
+      - name: Pack DJ toolkit zip (Claude Code)
+        run: |
+          set -euo pipefail
+          STAGE=dist/rekordbox-dj-toolkit
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          # Self-contained workflow layer: scripts, skills, docs, and a copy of the
+          # server package (so it needs no separate source download or .mcpb).
+          cp -r toolkit skills docs rekordbox_mcp "$STAGE"/
+          cp pyproject.toml uv.lock LICENSE "$STAGE"/
+          cp docs/TOOLKIT_SETUP.md "$STAGE"/SETUP.md
+          ( cd "$STAGE" && zip -r ../rekordbox-dj-toolkit.zip . -x '*/__pycache__/*' '*.pyc' )
+          echo "--- zip contents ---"
+          unzip -l dist/rekordbox-dj-toolkit.zip
+
+      - name: Attach bundles to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/rekordbox-mcp.mcpb
+          files: |
+            dist/rekordbox-mcp.mcpb
+            dist/rekordbox-dj-toolkit.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
